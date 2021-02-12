@@ -19,26 +19,39 @@ type Shell interface {
 }
 
 type shell struct {
-	handle backend.Waiter
-	stdin  io.Writer
-	stdout io.Reader
-	stderr io.Reader
+	handle        backend.Waiter
+	stdin         io.Writer
+	stdout        io.Reader
+	stderr        io.Reader
+	OutputChannel chan string
+	ErrorChannel  chan string
 }
 
 func New(backend backend.Starter) (*shell, error) {
 	handle, stdin, stdout, stderr, err := backend.StartProcess("powershell.exe", "-NoExit", "-Command", "-")
+
 	if err != nil {
 		return nil, err
 	}
+	outChan := make(chan string)
+	errChan := make(chan string)
 
-	return &shell{handle, stdin, stdout, stderr}, nil
+	currentShell := &shell{
+		handle:        handle,
+		stdin:         stdin,
+		stdout:        stdout,
+		stderr:        stderr,
+		OutputChannel: outChan,
+		ErrorChannel:  errChan,
+	}
+	return currentShell, nil
 }
 
-func (s *shell) Execute(cmd string, stdout chan<- string, stderr chan<- string) {
+func (s *shell) Execute(cmd string) {
 	if s.handle == nil {
-		stderr <- fmt.Sprintf("cannot execute on closed shells: %s", cmd)
-		close(stderr)
-		close(stdout)
+		s.ErrorChannel <- fmt.Sprintf("cannot execute on closed shells: %s", cmd)
+		close(s.ErrorChannel)
+		close(s.OutputChannel)
 	}
 
 	outBoundary := createBoundary()
@@ -49,9 +62,9 @@ func (s *shell) Execute(cmd string, stdout chan<- string, stderr chan<- string) 
 
 	_, err := s.stdin.Write([]byte(full))
 	if err != nil {
-		stderr <- fmt.Sprintf("Could not send PowerShell command: %s\nError: %s", cmd, err.Error())
-		close(stderr)
-		close(stdout)
+		s.ErrorChannel <- fmt.Sprintf("Could not send PowerShell command: %s\nError: %s", cmd, err.Error())
+		close(s.ErrorChannel)
+		close(s.OutputChannel)
 	}
 
 	// read stdout and stderr
@@ -71,9 +84,9 @@ func (s *shell) Execute(cmd string, stdout chan<- string, stderr chan<- string) 
 			if !ok {
 				break
 			}
-			stdout <- stdoutLines
+			s.OutputChannel <- stdoutLines
 		}
-		close(stdout)
+		close(s.OutputChannel)
 		waiter.Done()
 	}()
 	// read and write the stderr
@@ -83,12 +96,49 @@ func (s *shell) Execute(cmd string, stdout chan<- string, stderr chan<- string) 
 			if !ok {
 				break
 			}
-			stderr <- stderrLines
+			s.ErrorChannel <- stderrLines
 		}
-		close(stderr)
+		close(s.ErrorChannel)
 		waiter.Done()
 	}()
 	waiter.Wait()
+}
+
+func (s *shell) PrintOutput() {
+	for {
+		lines, ok := <-s.OutputChannel
+		if !ok {
+			break
+		}
+		fmt.Printf("%s\n", lines)
+	}
+	for {
+		lines, ok := <-s.ErrorChannel
+		if !ok {
+			break
+		}
+		fmt.Printf("%s\n", lines)
+	}
+}
+
+func (s *shell) PrintStdOut() {
+	for {
+		lines, ok := <-s.OutputChannel
+		if !ok {
+			break
+		}
+		fmt.Printf("%s\n", lines)
+	}
+}
+
+func (s *shell) PrintErrOut() {
+	for {
+		lines, ok := <-s.ErrorChannel
+		if !ok {
+			break
+		}
+		fmt.Printf("%s\n", lines)
+	}
 }
 
 func (s *shell) Exit() {

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gorillalabs/go-powershell/backend"
-	"github.com/gorillalabs/go-powershell/utils"
 	"github.com/juju/errors"
+	"github.com/pratermade/go-powershell.git/v2/backend"
+	"github.com/pratermade/go-powershell.git/v2/utils"
 )
 
 const newline = "\r\n"
